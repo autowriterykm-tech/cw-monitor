@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: cw-monitor
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # 無料インスタンス（メモリ512MB）
+    plan: free
+    envVars:
+      # ── CrowdWorks 認証 ──────────────────────────
+      - key: CW_EMAIL
+        sync: false   # Render ダッシュボードで手動設定
+      - key: CW_PASSWORD
+        sync: false
+
+      # ── LINE Notify ──────────────────────────────
+      - key: LINE_NOTIFY_TOKEN
+        sync: false
+
+      # ── LINE Messaging API ───────────────────────
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_USER_ID
+        sync: false
+
+      # ── Claude API（任意・省略でテンプレ文を使用）───
+      - key: ANTHROPIC_API_KEY
+        sync: false
