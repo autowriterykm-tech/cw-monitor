@@ -3,31 +3,33 @@
 const puppeteer = require('puppeteer');
 
 let _browser = null;
-let _loginPage = null; // ログイン済みセッションを保持するページ
+let _loginPage = null;
 
-/**
- * ブラウザのシングルトンを返す。
- * 死んでいたら再起動する。
- */
 async function getBrowser() {
   if (_browser && _browser.isConnected()) return _browser;
 
   console.log('[Browser] Launching Puppeteer...');
   _browser = await puppeteer.launch({
     headless: 'new',
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--single-process',          // Renderの低メモリ対策
+      '--no-first-run',
       '--no-zygote',
+      '--single-process',
+      '--disable-extensions',
+      '--disable-crash-reporter',
+      '--disable-in-process-stack-traces',
+      '--disable-logging',
+      '--disable-breakpad',
     ],
   });
 
   _browser.on('disconnected', () => {
-    console.warn('[Browser] Browser disconnected. Will relaunch on next call.');
+    console.warn('[Browser] Browser disconnected.');
     _browser = null;
     _loginPage = null;
   });
@@ -35,9 +37,6 @@ async function getBrowser() {
   return _browser;
 }
 
-/**
- * 新しいページを開いて返す（ブラウザを再利用）。
- */
 async function newPage() {
   const browser = await getBrowser();
   const page = await browser.newPage();
@@ -49,12 +48,7 @@ async function newPage() {
   return page;
 }
 
-/**
- * CrowdWorksにログインし、セッションを保持したページを返す。
- * すでにログイン済みなら再利用する。
- */
 async function getLoggedInPage() {
-  // 既存ページの生死確認
   if (_loginPage) {
     try {
       await _loginPage.evaluate(() => document.title);
@@ -80,7 +74,6 @@ async function getLoggedInPage() {
     timeout: 60_000,
   });
 
-  // ログインフォームの入力
   await page.waitForSelector('input[name="session[email]"]', { timeout: 15_000 });
   await page.type('input[name="session[email]"]', email, { delay: 50 });
   await page.type('input[name="session[password]"]', password, { delay: 50 });
@@ -90,17 +83,12 @@ async function getLoggedInPage() {
     page.click('input[type="submit"], button[type="submit"]'),
   ]);
 
-  // ログイン失敗チェック
   const currentUrl = page.url();
   if (currentUrl.includes('/login')) {
-    const errorText = await page.$eval(
-      '.error_message, .alert, [class*="error"]',
-      el => el.textContent.trim()
-    ).catch(() => '不明なエラー');
-    throw new Error(`ログイン失敗: ${errorText} (URL: ${currentUrl})`);
+    throw new Error(`ログイン失敗 (URL: ${currentUrl})`);
   }
 
-  console.log('[Auth] Login successful. Session page ready.');
+  console.log('[Auth] Login successful.');
   _loginPage = page;
   return _loginPage;
 }
