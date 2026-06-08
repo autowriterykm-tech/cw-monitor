@@ -66,7 +66,13 @@ async function getLoggedInPage() {
   console.log('[Auth] Page title:', await page.title());
 // ページのHTMLを確認
   const html = await page.content();
-  console.log('[Auth] Form HTML:', html.substring(0, 2000));
+// input要素だけを抽出して確認
+  const inputs = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('input')).map(i => ({
+      type: i.type, name: i.name, id: i.id, placeholder: i.placeholder
+    }));
+  });
+  console.log('[Auth] Input fields found:', JSON.stringify(inputs));
   await page.waitForSelector('input[type="email"], input[name="session[email]"], input[id="email"]', { timeout: 15_000 });
   const emailInput = await page.$('input[type="email"], input[name="session[email]"], input[id="email"]');
   const passwordInput = await page.$('input[type="password"]');
