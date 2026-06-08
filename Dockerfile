@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
+    HOME=/tmp
 
 WORKDIR /app
 
@@ -22,7 +23,7 @@ RUN PUPPETEER_SKIP_DOWNLOAD=true npm install --omit=dev
 
 COPY src/ ./src/
 
-RUN groupadd -r pptruser && useradd -r -g pptruser pptruser \
+RUN groupadd -r pptruser && useradd -r -g pptruser -d /tmp pptruser \
     && chown -R pptruser:pptruser /app
 USER pptruser
 
