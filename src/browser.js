@@ -8,7 +8,7 @@ async function getBrowser() {
   _browser = await puppeteer.launch({
     headless: true,
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome-stable',
-  args: [
+    args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
@@ -60,22 +60,11 @@ async function getLoggedInPage() {
     waitUntil: 'domcontentloaded',
     timeout: 60_000,
   });
-  // JS描画を待つ
   await new Promise(r => setTimeout(r, 5000));
- console.log('[Auth] Page URL after navigation:', page.url());
-  console.log('[Auth] Page title:', await page.title());
-// ページのHTMLを確認
-  const html = await page.content();
-// input要素だけを抽出して確認
-  const inputs = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('input')).map(i => ({
-      type: i.type, name: i.name, id: i.id, placeholder: i.placeholder
-    }));
-  });
-  console.log('[Auth] Input fields found:', JSON.stringify(inputs));
-  await page.waitForSelector('input[type="email"], input[name="session[email]"], input[id="email"]', { timeout: 15_000 });
-  const emailInput = await page.$('input[type="email"], input[name="session[email]"], input[id="email"]');
-  const passwordInput = await page.$('input[type="password"]');
+  console.log('[Auth] Page URL:', page.url());
+  await page.waitForSelector('input[name="username"]', { timeout: 15_000 });
+  const emailInput = await page.$('input[name="username"]');
+  const passwordInput = await page.$('input[name="password"]');
   await emailInput.type(email, { delay: 50 });
   await passwordInput.type(password, { delay: 50 });
   await Promise.all([
