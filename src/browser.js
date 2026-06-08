@@ -60,6 +60,8 @@ async function getLoggedInPage() {
     waitUntil: 'networkidle2',
     timeout: 60_000,
   });
+ console.log('[Auth] Page URL after navigation:', page.url());
+  console.log('[Auth] Page title:', await page.title());
   await page.waitForSelector('input[name="session[email]"]', { timeout: 15_000 });
   await page.type('input[name="session[email]"]', email, { delay: 50 });
   await page.type('input[name="session[password]"]', password, { delay: 50 });
