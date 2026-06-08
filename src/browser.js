@@ -57,9 +57,11 @@ async function getLoggedInPage() {
   const page = await newPage();
   console.log('[Auth] Navigating to login page...');
   await page.goto('https://crowdworks.jp/login', {
-    waitUntil: 'networkidle2',
+    waitUntil: 'domcontentloaded',
     timeout: 60_000,
   });
+  // JS描画を待つ
+  await new Promise(r => setTimeout(r, 5000));
  console.log('[Auth] Page URL after navigation:', page.url());
   console.log('[Auth] Page title:', await page.title());
 // ページのHTMLを確認
