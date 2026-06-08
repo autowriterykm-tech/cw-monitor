@@ -62,9 +62,14 @@ async function getLoggedInPage() {
   });
  console.log('[Auth] Page URL after navigation:', page.url());
   console.log('[Auth] Page title:', await page.title());
-  await page.waitForSelector('input[name="session[email]"]', { timeout: 15_000 });
-  await page.type('input[name="session[email]"]', email, { delay: 50 });
-  await page.type('input[name="session[password]"]', password, { delay: 50 });
+// ページのHTMLを確認
+  const html = await page.content();
+  console.log('[Auth] Form HTML:', html.substring(0, 2000));
+  await page.waitForSelector('input[type="email"], input[name="session[email]"], input[id="email"]', { timeout: 15_000 });
+  const emailInput = await page.$('input[type="email"], input[name="session[email]"], input[id="email"]');
+  const passwordInput = await page.$('input[type="password"]');
+  await emailInput.type(email, { delay: 50 });
+  await passwordInput.type(password, { delay: 50 });
   await Promise.all([
     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60_000 }),
     page.click('input[type="submit"], button[type="submit"]'),
