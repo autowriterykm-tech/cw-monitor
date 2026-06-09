@@ -129,7 +129,7 @@ async function applyToJob(jobId) {
 
     if (!detail.applyHref) {
       // ボタンを直接クリック
-      const applyBtn = await page.$('a[href*="/entry"], a[href*="apply"]');
+     const applyBtn = await page.$('a[href*="/entry"], a[href*="apply"], a[href*="/proposals/new"]');
       if (!applyBtn) {
         throw new Error('応募ボタンが見つかりませんでした');
       }
