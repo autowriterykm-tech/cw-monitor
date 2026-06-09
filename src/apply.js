@@ -2,13 +2,9 @@
 
 const { newPage, getLoggedInPage } = require('./browser');
 
-/**
- * Claude API で応募メッセージを自動生成
- */
 async function generateApplyMessage(jobTitle, jobDescription) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    // フォールバック：テンプレートメッセージ
     return generateTemplateMessage(jobTitle);
   }
 
@@ -35,7 +31,7 @@ ${jobDescription.slice(0, 500)}
     messages: [{ role: 'user', content: prompt }],
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const req = https.request(
       {
         hostname: 'api.anthropic.com',
@@ -55,11 +51,7 @@ ${jobDescription.slice(0, 500)}
           try {
             const json = JSON.parse(data);
             const text = json.content?.[0]?.text;
-            if (text) {
-              resolve(text.trim());
-            } else {
-              resolve(generateTemplateMessage(jobTitle));
-            }
+            resolve(text ? text.trim() : generateTemplateMessage(jobTitle));
           } catch {
             resolve(generateTemplateMessage(jobTitle));
           }
@@ -78,32 +70,37 @@ ChatGPTやClaudeなどの生成AIを活用したコンテンツ制作の経験�
 ご要望に沿った高品質な成果物をお届けできるよう尽力いたします。ぜひご検討いただければ幸いです。`;
 }
 
-/**
- * 案件詳細ページから情報を取得
- */
 async function getJobDetail(jobUrl) {
-  // ログイン済みセッションを保持するブラウザで新規ページを開く
-  await getLoggedInPage(); // セッション確認
+  await getLoggedInPage();
   const page = await newPage();
 
   try {
-    await page.goto(jobUrl, { waitUntil: 'networkidle2', timeout: 60_000 });
+    await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await new Promise(r => setTimeout(r, 3000));
 
-    // ログインリダイレクト確認
     if (page.url().includes('/login')) {
       throw new Error('ログインセッションが切れています');
     }
 
-    const detail = await page.evaluate(() => {
-      const title = document.querySelector('h1, .job_offer_detail__title, [class*="job_title"]')
-        ?.textContent?.trim() ?? 'タイトル不明';
-      const description = document.querySelector(
-        '.job_offer_detail__body, .description, [class*="job_description"], .offer_body'
-      )?.textContent?.trim() ?? '';
+    // ページのボタン情報をデバッグ
+    const debugInfo = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('a, button')).map(el => ({
+        tag: el.tagName,
+        text: el.textContent.trim().slice(0, 30),
+        href: el.getAttribute('href') || '',
+        className: el.className.slice(0, 50),
+      })).filter(el => el.text.includes('応募') || el.href.includes('entry'));
+      return buttons;
+    });
+    console.log('[Apply] Buttons found:', JSON.stringify(debugInfo));
 
-      // 応募フォームのセレクタを探す
+    const detail = await page.evaluate(() => {
+      const title = document.querySelector('h1')?.textContent?.trim() ?? 'タイトル不明';
+      const description = document.querySelector('body')?.textContent?.trim().slice(0, 500) ?? '';
+
+      // 応募ボタンを探す（複数パターン）
       const applyBtn = document.querySelector(
-        'a[href*="/entry"], button[class*="apply"], .apply_button, [class*="entry_btn"]'
+        'a[href*="/entry"], a[href*="apply"], a[href*="entry"]'
       );
       const applyHref = applyBtn?.getAttribute('href') ?? null;
 
@@ -117,87 +114,62 @@ async function getJobDetail(jobUrl) {
   }
 }
 
-/**
- * 案件への自動応募
- */
 async function applyToJob(jobId) {
   const jobUrl = `https://crowdworks.jp/public/jobs/${jobId}`;
   console.log(`[Apply] Starting application for job ${jobId}...`);
 
   let page;
   try {
-    // 案件詳細取得
     const detail = await getJobDetail(jobUrl);
     page = detail.page;
 
-    // AIで応募メッセージ生成
     console.log(`[Apply] Generating message for: ${detail.title}`);
     const applyMessage = await generateApplyMessage(detail.title, detail.description);
     console.log(`[Apply] Generated message: ${applyMessage.slice(0, 50)}...`);
 
-    // 応募ページへ遷移
-    let applyUrl;
-    if (detail.applyHref) {
-      applyUrl = detail.applyHref.startsWith('http')
-        ? detail.applyHref
-        : `https://crowdworks.jp${detail.applyHref}`;
-    } else {
-      // 直接応募ボタンをクリック
-      const applyBtn = await page.$(
-        'a[href*="/entry"], .apply_button, [class*="apply_btn"], [class*="entry"]'
-      );
+    if (!detail.applyHref) {
+      // ボタンを直接クリック
+      const applyBtn = await page.$('a[href*="/entry"], a[href*="apply"]');
       if (!applyBtn) {
-        throw new Error('応募ボタンが見つかりませんでした（すでに応募済みか、案件が終了している可能性）');
+        throw new Error('応募ボタンが見つかりませんでした');
       }
       await Promise.all([
-        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30_000 }),
+        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }),
         applyBtn.click(),
       ]);
-      applyUrl = page.url();
+    } else {
+      const applyUrl = detail.applyHref.startsWith('http')
+        ? detail.applyHref
+        : `https://crowdworks.jp${detail.applyHref}`;
+      await page.goto(applyUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     }
 
-    if (applyUrl && applyUrl !== page.url()) {
-      await page.goto(applyUrl, { waitUntil: 'networkidle2', timeout: 30_000 });
-    }
+    await new Promise(r => setTimeout(r, 2000));
+    console.log(`[Apply] Now on page: ${page.url()}`);
 
-    // メッセージフォームを探して入力
-    await page.waitForSelector(
-      'textarea[name*="message"], textarea[name*="body"], textarea[class*="message"], textarea',
-      { timeout: 15_000 }
-    );
+    // テキストエリアに入力
+    await page.waitForSelector('textarea', { timeout: 15_000 });
+    await page.evaluate((msg) => {
+      const ta = document.querySelector('textarea');
+      if (ta) {
+        ta.value = msg;
+        ta.dispatchEvent(new Event('input', { bubbles: true }));
+        ta.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+    }, applyMessage);
 
-    // 最初に見つかった textarea に入力
-    await page.evaluate(
-      (msg) => {
-        const ta = document.querySelector(
-          'textarea[name*="message"], textarea[name*="body"], textarea[class*="message"], textarea'
-        );
-        if (ta) {
-          ta.value = msg;
-          ta.dispatchEvent(new Event('input', { bubbles: true }));
-          ta.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-      },
-      applyMessage
-    );
-
-    // --- ここが重要：実際に送信する前にログで確認 ---
     console.log(`[Apply] Message filled. Submitting...`);
 
-    // 送信ボタンをクリック
-    const submitBtn = await page.$(
-      'input[type="submit"][value*="応募"], button[type="submit"], input[type="submit"]'
-    );
+    const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
     if (!submitBtn) {
       throw new Error('送信ボタンが見つかりませんでした');
     }
 
     await Promise.all([
-      page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30_000 }),
+      page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }),
       submitBtn.click(),
     ]);
 
-    // 成功確認
     const afterUrl = page.url();
     const isSuccess = !afterUrl.includes('/entry') || afterUrl.includes('/thanks');
     console.log(`[Apply] After submit URL: ${afterUrl}`);
