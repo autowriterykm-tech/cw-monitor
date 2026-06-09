@@ -82,29 +82,10 @@ async function getJobDetail(jobUrl) {
       throw new Error('ログインセッションが切れています');
     }
 
-    // ページのボタン情報をデバッグ
-    const debugInfo = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('a, button')).map(el => ({
-        tag: el.tagName,
-        text: el.textContent.trim().slice(0, 30),
-        href: el.getAttribute('href') || '',
-        className: el.className.slice(0, 50),
-      })).filter(el => el.text.includes('応募') || el.href.includes('entry'));
-      return buttons;
-    });
-    console.log('[Apply] Buttons found:', JSON.stringify(debugInfo));
-
     const detail = await page.evaluate(() => {
       const title = document.querySelector('h1')?.textContent?.trim() ?? 'タイトル不明';
       const description = document.querySelector('body')?.textContent?.trim().slice(0, 500) ?? '';
-
-      // 応募ボタンを探す（複数パターン）
-      const applyBtn = document.querySelector(
-        'a[href*="/entry"], a[href*="apply"], a[href*="entry"]'
-      );
-      const applyHref = applyBtn?.getAttribute('href') ?? null;
-
-      return { title, description, applyHref };
+      return { title, description };
     });
 
     return { ...detail, page };
@@ -127,32 +108,16 @@ async function applyToJob(jobId) {
     const applyMessage = await generateApplyMessage(detail.title, detail.description);
     console.log(`[Apply] Generated message: ${applyMessage.slice(0, 50)}...`);
 
-    if (!detail.applyHref) {
-      // ボタンを直接クリック
-     const applyBtn = await page.$('a[href*="/entry"], a[href*="apply"], a[href*="/proposals/new"]');
-      if (!applyBtn) {
-        throw new Error('応募ボタンが見つかりませんでした');
-      }
-      await Promise.all([
-        page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }),
-        applyBtn.click(),
-      ]);
-    } else {
-      const applyUrl = detail.applyHref.startsWith('http')
-        ? detail.applyHref
-        : `https://crowdworks.jp${detail.applyHref}`;
-      await page.goto(applyUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    }
-
-    await new Promise(r => setTimeout(r, 2000));
+    // 応募ページへ直接移動
+    const applyUrl = `https://crowdworks.jp/proposals/new?job_offer_id=${jobId}`;
+    await page.goto(applyUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await new Promise(r => setTimeout(r, 3000));
     console.log(`[Apply] Now on page: ${page.url()}`);
 
     // テキストエリアに入力
     await page.waitForSelector('textarea', { timeout: 15_000 });
-    await page.waitForSelector('textarea', { timeout: 15_000 });
     await page.click('textarea');
     await page.keyboard.type(applyMessage, { delay: 30 });
-
     console.log(`[Apply] Message filled. Submitting...`);
 
     const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
@@ -166,7 +131,7 @@ async function applyToJob(jobId) {
     ]);
 
     const afterUrl = page.url();
-    const isSuccess = !afterUrl.includes('/entry') || afterUrl.includes('/thanks');
+    const isSuccess = !afterUrl.includes('/proposals/new');
     console.log(`[Apply] After submit URL: ${afterUrl}`);
 
     return {
