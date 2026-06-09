@@ -115,8 +115,8 @@ async function applyToJob(jobId) {
     console.log(`[Apply] Now on page: ${page.url()}`);
 
     // テキストエリアに入力
-    await page.waitForSelector('textarea', { timeout: 15_000 });
-    await page.click('textarea');
+    await page.waitForSelector('textarea', { timeout: 15_000, visible: true });
+    await page.focus('textarea');
     await page.keyboard.type(applyMessage, { delay: 30 });
     console.log(`[Apply] Message filled. Submitting...`);
 
