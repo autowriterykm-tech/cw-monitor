@@ -8,14 +8,13 @@ const notifiedIds = new Set();
 const SEARCH_CONFIGS = [
   {
     label: 'AI案件',
-    url: 'https://crowdworks.jp/public/jobs/search?order=new&category_id=2&keyword=AI',
+    url: 'https://crowdworks.jp/public/jobs/search?order=new&category_id=228&search%5Bkeywords%5D=AI',
   },
   {
     label: 'ChatGPT案件',
-    url: 'https://crowdworks.jp/public/jobs/search?order=new&category_id=2&keyword=ChatGPT',
+    url: 'https://crowdworks.jp/public/jobs/search?order=new&category_id=228&search%5Bkeywords%5D=ChatGPT',
   },
 ];
-
 const INTERVAL_MS = 15 * 60 * 1000;
 
 async function scrapeJobs(url) {
