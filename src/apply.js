@@ -149,14 +149,9 @@ async function applyToJob(jobId) {
 
     // テキストエリアに入力
     await page.waitForSelector('textarea', { timeout: 15_000 });
-    await page.evaluate((msg) => {
-      const ta = document.querySelector('textarea');
-      if (ta) {
-        ta.value = msg;
-        ta.dispatchEvent(new Event('input', { bubbles: true }));
-        ta.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-    }, applyMessage);
+    await page.waitForSelector('textarea', { timeout: 15_000 });
+    await page.click('textarea');
+    await page.keyboard.type(applyMessage, { delay: 30 });
 
     console.log(`[Apply] Message filled. Submitting...`);
 
