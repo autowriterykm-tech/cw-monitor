@@ -1,9 +1,30 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const { getLoggedInPage, newPage } = require('./browser');
 const { notifyLine } = require('./line');
 
-const notifiedIds = new Set();
+// 通知済みIDをファイルで永続化
+const NOTIFIED_IDS_FILE = '/tmp/notified_ids.json';
+
+function loadNotifiedIds() {
+  try {
+    if (fs.existsSync(NOTIFIED_IDS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(NOTIFIED_IDS_FILE, 'utf8'));
+      return new Set(data);
+    }
+  } catch (_) {}
+  return new Set();
+}
+
+function saveNotifiedIds(ids) {
+  try {
+    fs.writeFileSync(NOTIFIED_IDS_FILE, JSON.stringify([...ids]));
+  } catch (_) {}
+}
+
+const notifiedIds = loadNotifiedIds();
 
 const SEARCH_CONFIGS = [
   {
@@ -15,6 +36,7 @@ const SEARCH_CONFIGS = [
     url: 'https://crowdworks.jp/public/jobs/search?order=new&category_id=228&search%5Bkeywords%5D=ChatGPT',
   },
 ];
+
 const INTERVAL_MS = 15 * 60 * 1000;
 
 async function scrapeJobs(url) {
@@ -31,20 +53,6 @@ async function scrapeJobs(url) {
       return scrapeJobs(url);
     }
 
-    // まずページ構造を確認
-    const debugInfo = await page.evaluate(() => {
-      const allLinks = Array.from(document.querySelectorAll('a[href*="/public/jobs/"]'));
-      return {
-        jobLinks: allLinks.slice(0, 3).map(a => ({
-          href: a.href,
-          text: a.textContent.trim().slice(0, 50),
-          parentClass: a.parentElement?.className?.slice(0, 100),
-        })),
-        totalLinks: allLinks.length,
-      };
-    });
-    console.log('[Scraper] Debug:', JSON.stringify(debugInfo));
-
     const jobs = await page.evaluate(() => {
       const items = [];
       const links = document.querySelectorAll('a[href*="/public/jobs/"]');
@@ -57,14 +65,12 @@ async function scrapeJobs(url) {
         const title = link.textContent.trim();
         if (!title || title.length < 5) return;
 
-        // 重複除去
         if (items.find(i => i.id === idMatch[1])) return;
 
         items.push({
           id: idMatch[1],
           title: title.slice(0, 100),
           url: `https://crowdworks.jp${href}`,
-          price: '価格は案件ページで確認',
         });
       });
 
@@ -82,6 +88,9 @@ async function checkNewJobs() {
   console.log('[Monitor] Checking for new jobs...');
   await getLoggedInPage();
 
+  // 全検索結果をまとめて重複除去
+  const allJobs = new Map();
+
   for (const config of SEARCH_CONFIGS) {
     let jobs;
     try {
@@ -92,27 +101,35 @@ async function checkNewJobs() {
     }
 
     for (const job of jobs) {
-      if (notifiedIds.has(job.id)) continue;
-      notifiedIds.add(job.id);
-
-      const message = [
-        `【新着 ${config.label}】`,
-        `📌 ${job.title}`,
-        `🔗 ${job.url}`,
-        '',
-        '応募する場合は「OK 案件ID」と返信してください。',
-        `（案件ID: ${job.id}）`,
-      ].join('\n');
-
-      try {
-        await notifyLine(message);
-        console.log(`[Monitor] Notified job ${job.id}: ${job.title}`);
-      } catch (err) {
-        console.error(`[Monitor] LINE notify error for job ${job.id}:`, err.message);
+      if (!allJobs.has(job.id)) {
+        allJobs.set(job.id, { ...job, label: config.label });
       }
-
-      await sleep(1000);
     }
+  }
+
+  // 未通知のもののみ通知
+  for (const [id, job] of allJobs) {
+    if (notifiedIds.has(id)) continue;
+    notifiedIds.add(id);
+    saveNotifiedIds(notifiedIds);
+
+    const message = [
+      `【新着 ${job.label}】`,
+      `📌 ${job.title}`,
+      `🔗 ${job.url}`,
+      '',
+      '応募する場合は「OK 案件ID」と返信してください。',
+      `（案件ID: ${id}）`,
+    ].join('\n');
+
+    try {
+      await notifyLine(message);
+      console.log(`[Monitor] Notified job ${id}: ${job.title}`);
+    } catch (err) {
+      console.error(`[Monitor] LINE notify error for job ${id}:`, err.message);
+    }
+
+    await sleep(1000);
   }
 }
 
