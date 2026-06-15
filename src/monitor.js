@@ -1,18 +1,16 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
+const https = require('https');
 const { getLoggedInPage, newPage } = require('./browser');
 const { notifyLine } = require('./line');
 
-// 通知済みIDをファイルで永続化
 const NOTIFIED_IDS_FILE = '/tmp/notified_ids.json';
 
 function loadNotifiedIds() {
   try {
     if (fs.existsSync(NOTIFIED_IDS_FILE)) {
-      const data = JSON.parse(fs.readFileSync(NOTIFIED_IDS_FILE, 'utf8'));
-      return new Set(data);
+      return new Set(JSON.parse(fs.readFileSync(NOTIFIED_IDS_FILE, 'utf8')));
     }
   } catch (_) {}
   return new Set();
@@ -38,6 +36,103 @@ const SEARCH_CONFIGS = [
 ];
 
 const INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Claude APIで案件を評価する
+ */
+async function evaluateJob(jobTitle, jobDetail) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return { ok: true, reason: 'API未設定のため通知' };
+
+  const prompt = `
+以下のCrowdWorksの案件を評価してください。
+
+【案件タイトル】
+${jobTitle}
+
+【案件詳細】
+${jobDetail.slice(0, 1500)}
+
+以下の条件でJSON形式のみで回答してください：
+
+OK条件：
+- テキスト・Googleドキュメント納品のみ
+- AI使用OK・未経験OK・初心者OK
+- 年齢・性別制限なし
+- クライアントの評価・発注実績がある
+
+NG条件：
+- WordPress入稿が必要
+- 画像・動画編集が必要
+- 年齢制限・性別限定がある
+- クライアントの評価ゼロ・本人確認未提出
+- 体験談・実体験必須（AIで書けない）
+- 医療・法律など専門知識必須
+
+回答形式（JSONのみ）:
+{"ok": true または false, "reason": "理由を一言で"}
+`.trim();
+
+  const body = JSON.stringify({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 200,
+    messages: [{ role: 'user', content: prompt }],
+  });
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.anthropic.com',
+        path: '/v1/messages',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      res => {
+        let data = '';
+        res.on('data', c => (data += c));
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            const text = json.content?.[0]?.text?.trim();
+            const parsed = JSON.parse(text);
+            resolve(parsed);
+          } catch {
+            resolve({ ok: true, reason: '判断エラーのため通知' });
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve({ ok: true, reason: 'API接続エラーのため通知' }));
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * 案件詳細ページから情報を取得
+ */
+async function getJobDetail(jobUrl) {
+  const page = await newPage();
+  try {
+    await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await new Promise(r => setTimeout(r, 2000));
+
+    const detail = await page.evaluate(() => {
+      return document.querySelector('body')?.textContent?.trim().slice(0, 1500) ?? '';
+    });
+
+    return detail;
+  } catch (_) {
+    return '';
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
 
 async function scrapeJobs(url) {
   const page = await newPage();
@@ -88,7 +183,6 @@ async function checkNewJobs() {
   console.log('[Monitor] Checking for new jobs...');
   await getLoggedInPage();
 
-  // 全検索結果をまとめて重複除去
   const allJobs = new Map();
 
   for (const config of SEARCH_CONFIGS) {
@@ -107,16 +201,28 @@ async function checkNewJobs() {
     }
   }
 
-  // 未通知のもののみ通知
   for (const [id, job] of allJobs) {
     if (notifiedIds.has(id)) continue;
     notifiedIds.add(id);
     saveNotifiedIds(notifiedIds);
 
+    // 案件詳細を取得してClaudeに評価させる
+    console.log(`[Monitor] Evaluating job ${id}: ${job.title}`);
+    const detail = await getJobDetail(job.url);
+    const evaluation = await evaluateJob(job.title, detail);
+
+    console.log(`[Monitor] Evaluation: ${JSON.stringify(evaluation)}`);
+
+    if (!evaluation.ok) {
+      console.log(`[Monitor] Skipped job ${id}: ${evaluation.reason}`);
+      continue;
+    }
+
     const message = [
       `【新着 ${job.label}】`,
       `📌 ${job.title}`,
       `🔗 ${job.url}`,
+      `✅ ${evaluation.reason}`,
       '',
       '応募する場合は「OK 案件ID」と返信してください。',
       `（案件ID: ${id}）`,
