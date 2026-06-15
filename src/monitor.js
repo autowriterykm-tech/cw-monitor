@@ -97,10 +97,11 @@ NG条件：
         res.on('data', c => (data += c));
         res.on('end', () => {
           try {
-            const json = JSON.parse(data);
-            const text = json.content?.[0]?.text?.trim();
-            const parsed = JSON.parse(text);
-            resolve(parsed);
+          const json = JSON.parse(data);
+          const text = json.content?.[0]?.text?.trim();
+          const clean = text.replace(/```json|```/g, '').trim();
+          const parsed = JSON.parse(clean);
+          resolve(parsed);
           } catch {
             resolve({ ok: true, reason: '判断エラーのため通知' });
           }
