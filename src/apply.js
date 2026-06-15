@@ -1,33 +1,40 @@
 'use strict';
 
+const https = require('https');
 const { newPage, getLoggedInPage } = require('./browser');
 
 async function generateApplyMessage(jobTitle, jobDescription) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  const myName = process.env.MY_NAME || '';
+  const myAge = process.env.MY_AGE || '';
+
   if (!apiKey) {
-    return generateTemplateMessage(jobTitle);
+    return { message: generateTemplateMessage(jobTitle), price: '50000' };
   }
 
-  const https = require('https');
   const prompt = `
-以下のCrowdWorksの案件に対して、採用されやすい自然な日本語の応募メッセージを作成してください。
-- 長さは200〜300文字程度
-- AIやライティングの経験があることをアピール
-- 丁寧かつ熱意が伝わる文体
-- 定型文っぽくならないよう自然に
+以下のCrowdWorksの案件に応募するメッセージと契約金額を生成してください。
+
+【応募者情報】
+氏名: ${myName}
+年齢: ${myAge}歳
 
 【案件タイトル】
 ${jobTitle}
 
 【案件詳細】
-${jobDescription.slice(0, 500)}
+${jobDescription.slice(0, 1000)}
 
-応募メッセージのみを出力してください（前置きや説明は不要）。
+JSONのみで回答してください：
+{
+  "message": "応募メッセージ（200〜300文字、案件の必須記載事項を必ず含める）",
+  "price": "契約金額の数字のみ（案件の目安最小値、例: 50000）"
+}
 `.trim();
 
   const body = JSON.stringify({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 500,
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1000,
     messages: [{ role: 'user', content: prompt }],
   });
 
@@ -50,24 +57,29 @@ ${jobDescription.slice(0, 500)}
         res.on('end', () => {
           try {
             const json = JSON.parse(data);
-            const text = json.content?.[0]?.text;
-            resolve(text ? text.trim() : generateTemplateMessage(jobTitle));
+            const text = json.content?.[0]?.text?.trim();
+            const clean = text.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(clean);
+            resolve({
+              message: parsed.message || generateTemplateMessage(jobTitle),
+              price: parsed.price || '50000',
+            });
           } catch {
-            resolve(generateTemplateMessage(jobTitle));
+            resolve({ message: generateTemplateMessage(jobTitle), price: '50000' });
           }
         });
       }
     );
-    req.on('error', () => resolve(generateTemplateMessage(jobTitle)));
+    req.on('error', () => resolve({ message: generateTemplateMessage(jobTitle), price: '50000' }));
     req.write(body);
     req.end();
   });
 }
 
 function generateTemplateMessage(jobTitle) {
-  return `はじめまして。AIライティングの案件「${jobTitle}」に応募させていただきます。
-ChatGPTやClaudeなどの生成AIを活用したコンテンツ制作の経験があり、SEOを意識した読みやすい記事作成が得意です。
-ご要望に沿った高品質な成果物をお届けできるよう尽力いたします。ぜひご検討いただければ幸いです。`;
+  const name = process.env.MY_NAME || '';
+  const age = process.env.MY_AGE || '';
+  return `はじめまして。${name}と申します（${age}歳）。「${jobTitle}」に応募させていただきます。ChatGPTやClaudeなどの生成AIを活用したコンテンツ制作の経験があり、SEOを意識した読みやすい記事作成が得意です。ご要望に沿った高品質な成果物をお届けできるよう尽力いたします。ぜひご検討いただければ幸いです。`;
 }
 
 async function getJobDetail(jobUrl) {
@@ -84,7 +96,7 @@ async function getJobDetail(jobUrl) {
 
     const detail = await page.evaluate(() => {
       const title = document.querySelector('h1')?.textContent?.trim() ?? 'タイトル不明';
-      const description = document.querySelector('body')?.textContent?.trim().slice(0, 500) ?? '';
+      const description = document.querySelector('body')?.textContent?.trim().slice(0, 1000) ?? '';
       return { title, description };
     });
 
@@ -105,8 +117,8 @@ async function applyToJob(jobId) {
     page = detail.page;
 
     console.log(`[Apply] Generating message for: ${detail.title}`);
-    const applyMessage = await generateApplyMessage(detail.title, detail.description);
-    console.log(`[Apply] Generated message: ${applyMessage.slice(0, 50)}...`);
+    const { message: applyMessage, price: applyPrice } = await generateApplyMessage(detail.title, detail.description);
+    console.log(`[Apply] Price: ${applyPrice}, Message: ${applyMessage.slice(0, 50)}...`);
 
     // 応募ページへ直接移動
     const applyUrl = `https://crowdworks.jp/proposals/new?job_offer_id=${jobId}`;
@@ -114,13 +126,22 @@ async function applyToJob(jobId) {
     await new Promise(r => setTimeout(r, 3000));
     console.log(`[Apply] Now on page: ${page.url()}`);
 
+    // 契約金額を入力
+    const priceInput = await page.$('input[type="number"], input[name*="price"], input[name*="amount"]');
+    if (priceInput) {
+      await priceInput.click({ clickCount: 3 });
+      await priceInput.type(applyPrice, { delay: 30 });
+      console.log(`[Apply] Price filled: ${applyPrice}`);
+    }
+
     // テキストエリアに入力
     await page.waitForSelector('textarea', { timeout: 15_000, visible: true });
     await page.focus('textarea');
     await page.keyboard.type(applyMessage, { delay: 30 });
     console.log(`[Apply] Message filled. Submitting...`);
 
-    const submitBtn = await page.$('button[type="submit"], input[type="submit"]');
+    // 応募するボタンをクリック
+    const submitBtn = await page.$('input[value="応募する"], button.cw-button--primary, button[type="submit"]');
     if (!submitBtn) {
       throw new Error('送信ボタンが見つかりませんでした');
     }
