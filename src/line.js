@@ -80,7 +80,14 @@ async function pushLine(text) {
       res => {
         let data = '';
         res.on('data', c => (data += c));
-        res.on('end', () => resolve(data));
+res.on('end', () => {
+  if (res.statusCode === 200) {
+    resolve(data);
+  } else {
+    console.error(`[LINE] Push error: ${res.statusCode} ${data}`);
+    resolve(data);
+  }
+});
       }
     );
     req.on('error', reject);
