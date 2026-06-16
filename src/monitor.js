@@ -103,9 +103,9 @@ NG条件（一つでも該当したらok:false）：
             const clean = text.replace(/```json|```/g, '').trim();
             const parsed = JSON.parse(clean);
             resolve(parsed);
-          } catch {
-            resolve({ ok: true, reason: '判断エラーのため通知' });
-          }
+} catch {
+  resolve({ ok: false, reason: '判断エラーのためスキップ' });
+}
         });
       }
     );
