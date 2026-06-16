@@ -37,9 +37,6 @@ const SEARCH_CONFIGS = [
 
 const INTERVAL_MS = 15 * 60 * 1000;
 
-/**
- * Claude APIで案件を評価する
- */
 async function evaluateJob(jobTitle, jobDetail) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: true, reason: 'API未設定のため通知' };
@@ -52,10 +49,6 @@ ${jobTitle}
 
 【案件詳細】
 ${jobDetail.slice(0, 1500)}
-
-以下の条件でJSON形式のみで回答してください：
-
-以下の条件でJSON形式のみで回答してください：
 
 おすすめ条件（全部満たす場合のみok:true）：
 - テキスト・Googleドキュメント納品のみ
@@ -79,6 +72,7 @@ NG条件（一つでも該当したらok:false）：
 
 回答形式（JSONのみ）:
 {"ok": true または false, "reason": "理由を一言で"}
+`.trim();
 
   const body = JSON.stringify({
     model: 'claude-haiku-4-5-20251001',
@@ -104,11 +98,11 @@ NG条件（一つでも該当したらok:false）：
         res.on('data', c => (data += c));
         res.on('end', () => {
           try {
-          const json = JSON.parse(data);
-          const text = json.content?.[0]?.text?.trim();
-          const clean = text.replace(/```json|```/g, '').trim();
-          const parsed = JSON.parse(clean);
-          resolve(parsed);
+            const json = JSON.parse(data);
+            const text = json.content?.[0]?.text?.trim();
+            const clean = text.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(clean);
+            resolve(parsed);
           } catch {
             resolve({ ok: true, reason: '判断エラーのため通知' });
           }
@@ -121,9 +115,6 @@ NG条件（一つでも該当したらok:false）：
   });
 }
 
-/**
- * 案件詳細ページから情報を取得
- */
 async function getJobDetail(jobUrl) {
   const page = await newPage();
   try {
@@ -214,7 +205,6 @@ async function checkNewJobs() {
     notifiedIds.add(id);
     saveNotifiedIds(notifiedIds);
 
-    // 案件詳細を取得してClaudeに評価させる
     console.log(`[Monitor] Evaluating job ${id}: ${job.title}`);
     const detail = await getJobDetail(job.url);
     const evaluation = await evaluateJob(job.title, detail);
@@ -227,7 +217,7 @@ async function checkNewJobs() {
     }
 
     const message = [
-      `【新着 ${job.label}】`,
+      `⭐【おすすめ ${job.label}】`,
       `📌 ${job.title}`,
       `🔗 ${job.url}`,
       `✅ ${evaluation.reason}`,
@@ -240,7 +230,7 @@ async function checkNewJobs() {
       await notifyLine(message);
       console.log(`[Monitor] Notified job ${id}: ${job.title}`);
     } catch (err) {
-      console.error(`[Monitor] LINE notify error for job ${id}:`, err.message);
+      console.error(`[Monitor] notify error for job ${id}:`, err.message);
     }
 
     await sleep(1000);
