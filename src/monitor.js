@@ -41,14 +41,28 @@ async function evaluateJob(jobTitle, jobDetail) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { ok: true, reason: 'API未設定のため通知' };
 
+  // ▼ 追加：詳細テキストから応募状況を拾って倍率を計算
+  const appliedM = jobDetail.match(/応募した人\s*(\d+)\s*人/);
+  const recruitM = jobDetail.match(/募集人数\s*(\d+)\s*人/);
+  const applied = appliedM ? Number(appliedM[1]) : null;
+  const recruit = recruitM ? Number(recruitM[1]) : null;
+  const ratio = applied && recruit ? Math.round(applied / recruit) : null;
+  const ratioLine =
+    ratio !== null
+      ? `応募${applied}人 / 募集${recruit}人 = 約${ratio}倍`
+      : '不明（ページから取得できず）';
+
   const prompt = `
 以下のCrowdWorksの案件を評価してください。
 
 【案件タイトル】
 ${jobTitle}
 
+【応募倍率】
+${ratioLine}
+
 【案件詳細】
-${jobDetail.slice(0, 1500)}
+${jobDetail.slice(0, 3500)}
 
 おすすめ条件（全部満たす場合のみok:true）：
 - テキスト・Googleドキュメント納品のみ
@@ -60,6 +74,7 @@ ${jobDetail.slice(0, 1500)}
 - 継続依頼あり・長期案件
 
 NG条件（一つでも該当したらok:false）：
+- 応募倍率が高すぎる（応募者数 ÷ 募集人数 が約50倍以上）。競争が激しすぎて契約される見込みが薄い
 - WordPress入稿が必要
 - 画像・動画編集が必要
 - 年齢制限・性別限定がある（女性限定・男性限定・20代限定なども含む）
@@ -103,9 +118,9 @@ NG条件（一つでも該当したらok:false）：
             const clean = text.replace(/```json|```/g, '').trim();
             const parsed = JSON.parse(clean);
             resolve(parsed);
-} catch {
-  resolve({ ok: false, reason: '判断エラーのためスキップ' });
-}
+          } catch {
+            resolve({ ok: false, reason: '判断エラーのためスキップ' });
+          }
         });
       }
     );
@@ -119,10 +134,38 @@ async function getJobDetail(jobUrl) {
   const page = await newPage();
   try {
     await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-    await new Promise(r => setTimeout(r, 2000));
+    // 詳細の動的描画を待つため少し長めに待機
+    await new Promise(r => setTimeout(r, 3000));
 
     const detail = await page.evaluate(() => {
-      return document.querySelector('body')?.textContent?.trim().slice(0, 1500) ?? '';
+      // ① 案件本文が入っていそうなメインコンテナを優先的に探す
+      const candidates = [
+        '.job_offer_detail',
+        '#job_offer_detail',
+        '.cw-jobOfferDetail',
+        '[class*="jobOffer"]',
+        '[class*="job_offer"]',
+        'main',
+        '#main',
+        '#content',
+      ];
+
+      let best = '';
+      for (const sel of candidates) {
+        document.querySelectorAll(sel).forEach(el => {
+          // 改行・連続空白を1スペースに圧縮（スカスカ対策）
+          const t = (el.textContent || '').replace(/\s+/g, ' ').trim();
+          if (t.length > best.length) best = t;
+        });
+      }
+
+      // ② メインが取れなければ body 全体にフォールバック
+      if (best.length < 200) {
+        best = (document.body?.textContent || '').replace(/\s+/g, ' ').trim();
+      }
+
+      // ③ 取得量を 1500 → 5000 に拡大（報酬・本文・応募状況まで含める）
+      return best.slice(0, 5000);
     });
 
     return detail;
@@ -207,6 +250,10 @@ async function checkNewJobs() {
 
     console.log(`[Monitor] Evaluating job ${id}: ${job.title}`);
     const detail = await getJobDetail(job.url);
+    // ▼ 詳細がほぼ取れなかった場合はログに残す（セレクタ調整の手がかり）
+    if (!detail || detail.length < 200) {
+      console.warn(`[Monitor] Detail too short for job ${id} (len=${detail.length}). Check selectors.`);
+    }
     const evaluation = await evaluateJob(job.title, detail);
 
     console.log(`[Monitor] Evaluation: ${JSON.stringify(evaluation)}`);
