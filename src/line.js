@@ -2,27 +2,68 @@
 const https = require('https');
 
 /**
- * Slack と LINE 両方に通知
+ * Slack と Telegram に通知（LINEは卒業）
+ * ※ monitor.js が notifyLine を呼んでいるため、関数名は維持
  */
 async function notifyLine(message) {
   await Promise.allSettled([
     pushSlack(message),
-    pushLine(message),
+    pushTelegram(message),
   ]);
 }
 
 /**
- * Slack にメッセージ送信
+ * Telegram にメッセージ送信
+ */
+async function pushTelegram(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+
+  const body = JSON.stringify({ chat_id: chatId, text });
+
+  return new Promise((resolve) => {
+    const req = https.request(
+      {
+        hostname: 'api.telegram.org',
+        path: `/bot${token}/sendMessage`,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      res => {
+        let data = '';
+        res.on('data', c => (data += c));
+        res.on('end', () => {
+          if (res.statusCode === 200) {
+            console.log('[Telegram] Message sent successfully');
+          } else {
+            console.error(`[Telegram] Push error: ${res.statusCode} ${data}`);
+          }
+          resolve(data);
+        });
+      }
+    );
+    req.on('error', (e) => {
+      console.error('[Telegram] Request error:', e.message);
+      resolve();
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * Slack にメッセージ送信（既存のまま）
  */
 async function pushSlack(text) {
   const token = process.env.SLACK_BOT_TOKEN;
   const channel = process.env.SLACK_CHANNEL_ID || '#general';
   if (!token) return;
 
-  const body = JSON.stringify({
-    channel,
-    text,
-  });
+  const body = JSON.stringify({ channel, text });
 
   return new Promise((resolve) => {
     const req = https.request(
@@ -40,12 +81,11 @@ async function pushSlack(text) {
         let data = '';
         res.on('data', c => (data += c));
         res.on('end', () => {
-          const json = JSON.parse(data);
-          if (json.ok) {
-            console.log('[Slack] Message sent successfully');
-          } else {
-            console.error('[Slack] Error:', json.error);
-          }
+          try {
+            const json = JSON.parse(data);
+            if (json.ok) console.log('[Slack] Message sent successfully');
+            else console.error('[Slack] Error:', json.error);
+          } catch (_) {}
           resolve(data);
         });
       }
@@ -59,84 +99,4 @@ async function pushSlack(text) {
   });
 }
 
-/**
- * LINE Push メッセージ
- */
-async function pushLine(text) {
-  const channelToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  const userId = process.env.LINE_USER_ID;
-  if (!channelToken || !userId) return;
-
-  const body = JSON.stringify({
-    to: userId,
-    messages: [{ type: 'text', text }],
-  });
-
-  return new Promise((resolve) => {
-    const req = https.request(
-      {
-        hostname: 'api.line.me',
-        path: '/v2/bot/message/push',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${channelToken}`,
-          'Content-Length': Buffer.byteLength(body),
-        },
-      },
-      res => {
-        let data = '';
-        res.on('data', c => (data += c));
-        res.on('end', () => {
-          if (res.statusCode === 200) {
-            console.log('[LINE] Message sent successfully');
-          } else {
-            console.error(`[LINE] Push error: ${res.statusCode} ${data}`);
-          }
-          resolve(data);
-        });
-      }
-    );
-    req.on('error', (e) => {
-      console.error('[LINE] Request error:', e.message);
-      resolve();
-    });
-    req.write(body);
-    req.end();
-  });
-}
-
-async function replyLine(replyToken, text) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) return;
-
-  const body = JSON.stringify({
-    replyToken,
-    messages: [{ type: 'text', text }],
-  });
-
-  return new Promise((resolve) => {
-    const req = https.request(
-      {
-        hostname: 'api.line.me',
-        path: '/v2/bot/message/reply',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-          'Content-Length': Buffer.byteLength(body),
-        },
-      },
-      res => {
-        let data = '';
-        res.on('data', chunk => (data += chunk));
-        res.on('end', () => resolve(data));
-      }
-    );
-    req.on('error', resolve);
-    req.write(body);
-    req.end();
-  });
-}
-
-module.exports = { notifyLine, replyLine, pushSlack, pushLine };
+module.exports = { notifyLine, pushTelegram, pushSlack };
